@@ -1,0 +1,566 @@
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+
+<!Doctype html>
+<html>
+    <head>
+        <link rel = "stylesheet" href = "HomePageStyle.css">
+
+        <script src="https://kit.fontawesome.com/b99e675b6e.js"></script>
+        <script src="./node_modules/web3/dist/web3.min.js"></script>
+        <script src="HistoricBlockChainDataParser.js"></script>
+        <script src="https://canvasjs.com/assets/script/canvasjs.min.js"></script>
+        <script src="./node-fetch.js"></script>
+
+        <script>
+            onload = () => {
+                var shouldScrapeLatestData = true;
+                //fetch and prepare data for all the UI components except the graph
+                fetchLatestData();
+
+                //prepare the graph with its data
+                prepareGraph();
+            }
+
+            //Make data contents visible and vanish loading effect
+            function makeFetchedDataSegmentVisible() {
+                document.getElementById('loadingEffeectPara').style.visibility = 'collapse';
+                document.getElementById('mainContentDiv').style.visibility = 'visible';
+                document.getElementById('loadingEffeectPara').style.display = 'none';
+            }
+
+            function fetchTPSData(data) {
+                var tpsTag = 'title=\'Transactions per Second\'> (';
+                var tpsPosition = data.indexOf(tpsTag) + tpsTag.length;
+                var tps = "";
+                var len = data.length;
+                for(var i=tpsPosition; i<len && data[i] != 'T'; i++) {
+                    tps += data[i];
+                }
+
+                document.getElementById('tpsInfo').innerHTML = tps;
+            }
+
+            function fetchDiffiicultyData(data) {
+                var difficultyTag = 'href=\"/chart/difficulty\">';
+                var difficultyPosition = data.indexOf(difficultyTag) + difficultyTag.length;
+                var difficulty = "";
+                var len = data.length;
+                for(var i=difficultyPosition; i<len && data[i] != 'T'; i++) {
+                    difficulty += data[i];
+                }
+
+                document.getElementById('difficultyInfo').innerHTML = difficulty;
+            }
+
+            function prepareGraph() {
+
+                fetch('https://api.codetabs.com/v1/proxy?quest=https://etherscan.io/chart/tx')
+                .then(
+                    function(response) {
+                        if (response.status !== 200) {
+                            alert("Problem scraping");
+                            console.log('Looks like there was a problem. Status Code: ' +
+                            response.status);
+                            return;
+                        }
+
+                        // Examine the text in the response
+                        response.text().then(function(data) {
+                            // data contains all the plain html of the url you previously set, 
+                            // you can use it as you want, it is typeof string
+                            ///console.log(data);
+                            var sourceText = getRecentStats(data);
+
+                            //alert(sourceText);
+                            
+                            var recentAverageBlockTimes = getRecentTagSpecificDataFromTrnxPage(sourceText, "blockTime : \'");
+
+                            var recentTrnxCounts = getRecentTagSpecificDataFromTrnxPage(sourceText, "formattedValue : \'");
+
+                            var recentDates = getRecentTagSpecificDataFromTrnxPage(sourceText, "dt : \'");
+
+                            const secondsInADay = 3600 * 24;
+
+                            var recentTrnxTotal = recentTrnxCounts.length;
+                            for(var i=0; i<recentTrnxTotal; i++) {
+                                recentTrnxCounts[i] = parseInt(recentTrnxCounts[i].replace(/,/g, ''));
+                            }
+
+                            recentTrnxCounts = recentTrnxCounts.reverse();
+                            recentAverageBlockTimes = recentAverageBlockTimes.reverse();
+
+                            var dates = [];
+                            for(var i=recentDates.length-1, j=0; i>-1; i--) {
+                                var temp = "";
+                                temp = recentDates[i].substring(recentDates[i].indexOf(',') + 2, recentDates[i].length);
+                                dates.push(temp);
+                            }
+
+                            var yAxisValues = recentTrnxCounts;
+
+                            var chart = new CanvasJS.Chart("chartContainer", {
+                                title: {
+                                    text: "ETHEREUM TRANSACTION HISTORY IN 7 DAYS"
+                                },
+                                axisX: {
+                                    valueFormatString: "DD MMM YYYY"
+                                },
+                                axisY2: {
+                                    title: "Transaction Count",
+                                    prefix: "",
+                                    suffix: ""
+                                },
+                                toolTip: {
+                                    shared: true,
+                                    contentFormatter: function (e) {
+                                        var content = " ";
+                                        var len = e.entries.length;
+                                        for (var i = 0; i < len; i++) {
+                                            var index = yAxisValues.indexOf( e.entries[i].dataPoint.y );
+
+                                            content += "<b>";
+                                            content += dates[index];
+                                            content += "</b>";
+                                            content += "<br/>";
+
+                                            content += "Transactions: ";
+                                            content += e.entries[i].dataPoint.y.toString();
+                                            content += "<br/>";
+
+                                            content += "TPS: ";
+                                            content += (e.entries[i].dataPoint.y / secondsInADay).toFixed(2);;
+                                            content += "<br/>";
+
+                                            content += "Avg Block time: ";
+                                            content += recentAverageBlockTimes[index].toString();
+                                        }
+                                        return content;
+                                    }
+                                },
+                                legend: {
+                                    cursor: "pointer",
+                                    verticalAlign: "top",
+                                    horizontalAlign: "center",
+                                    dockInsidePlotArea: true,
+                                    itemclick: toogleDataSeries
+                                },
+                                data: [{
+                                    type:"spline",
+                                    axisYType: "secondary",
+                                    name: "Transactions", //Edit if you want
+                                    showInLegend: true,
+                                    markerSize: 0,
+                                    yValueFormatString: "#,###,###",    /*"$#,###k"*/
+                                    dataPoints: [		
+                                        { x: new Date( dates[0] ), y: yAxisValues[0] },
+                                        { x: new Date( dates[1] ), y: yAxisValues[1] },
+                                        { x: new Date( dates[2] ), y: yAxisValues[2] },
+                                        { x: new Date( dates[3] ), y: yAxisValues[3] },
+                                        { x: new Date( dates[4] ), y: yAxisValues[4] },
+                                        { x: new Date( dates[5] ), y: yAxisValues[5] },
+                                        { x: new Date( dates[6] ), y: yAxisValues[6] }
+                                    ]
+                                }
+                                ]
+                            });
+                            chart.render();
+                        });
+                        makeFetchedDataSegmentVisible();
+                        return;
+                    }
+                )
+                .catch(function(err) {
+                    console.log('Fetch Error :-S', err);
+                });
+
+                return;
+            }
+
+            function getRecentStats(data) {
+                var tag = '},];';
+
+                var idx = data.indexOf( tag );
+                var core = "";
+                var total = 15;
+                while(total > 0 && idx > -1) {
+                    core += data[idx];
+                    if(data[idx] == '{') {
+                        total--;
+                    }
+                    idx--;
+                }
+
+                var reversed = "";
+                for(var i=core.length-1; i>-1; i--) {
+                    reversed += core[i];
+                }
+
+                return reversed;
+            }
+
+            function getRecentTagSpecificDataFromTrnxPage(data, tag) {
+                var len = data.length, tagLen = tag.length;
+                let times = [];
+                let idx = data.indexOf(tag);
+                    
+                while (idx != -1) {
+                    var time = "";
+                    var j;
+                    for(j=idx+tagLen; j<len && data[j] != '\''; j++) {
+                        time += data[j];
+                    }
+
+                    times.push(time);
+                    idx = data.indexOf(tag, idx+1);
+                }
+
+                return times;
+            }
+
+            function fetchTransactionHistoryData(data) {
+                var trnxHistoryTag = 'data: [';
+                var trnxHistoryPosition = data.indexOf(trnxHistoryTag) + trnxHistoryTag.length;
+                var difficulty = "";
+                var historyData = [];
+                var recordCount = 0;
+                var len = data.length;
+                for(var i=trnxHistoryPosition; i<len && recordCount < 15; i++) {
+                    if(data[i] == '{') {
+                        recordCount++;
+                        var pointCount = 0;
+                        var singleRecord = [];
+                        var j;
+                        for(j=i+1; j<len && pointCount < 4; j++) {
+                            if(data[j] == '\'') {
+                                var temp = "";
+                                pointCount++;
+                                j++;
+                                while(j < len && (data[j] != '\'')) {
+                                    temp += data[j];
+                                    j++;
+                                }
+                                singleRecord.push(temp);
+                            }
+                        }
+
+                        historyData.push( singleRecord );
+                        i = j - 1;
+                    }
+                }
+            }
+
+            function fetchLatestBlockData(data) {
+                var blockTag = 'Block</span> <a href=\'/block/';
+                let blockNumbers = getTagSpecificInfo(data, blockTag);
+                //alert(blockNumbers);
+
+                var trnxCountTag = 'title=\"Transactions in this Block\">';
+                let trnxCount = getTagSpecificInfo(data, trnxCountTag);
+                //alert(trnxCount);
+
+                var minerTag = 'Miner <a class=\'hash-tag text-truncate\' href=\'/address/';
+                let miners = getIdentifierList(data, minerTag);
+                //alert(miners);
+
+                var table = document.getElementById('blockTableBody');
+                for (var i = 0; i < blockNumbers.length && i < trnxCount.length && i < miners.length; i++){
+                    var row = `<tr>
+                                    <td style='width: 33.33%;  text-align: center;'>${'Block:' + '&nbsp' + blockNumbers[i]}</td>
+                                    <td style='width: 33.33%;  text-align: left;'>${'Miner:' + '&nbsp' + miners[i].substring(0,20)}</td>
+                                    <td style='width: 33.33%;  text-align: left;'>${'Trnx count:' + '&nbsp' + trnxCount[i]}</td>
+                                </tr>`;
+
+                    table.innerHTML += row
+                }
+            }
+
+            function getTagSpecificInfo(data, tag) {
+                var len = data.length, tagLen = tag.length;
+                let numbers = [];
+                let idx = data.indexOf(tag);
+                    
+                while (idx != -1) {
+                    var num = "";
+                    for(var j=idx+tagLen; j<len && data[j] >= '0' && data[j] <= '9'; j++) {
+                        num += data[j];
+                    }
+                    numbers.push(num);
+                    idx = data.indexOf(tag, idx+1);
+                }
+        
+                return numbers;
+            }
+
+            function fetchLatestTransactionData(data) {
+                var transactionTag = 'TX#</span><a class=\'hash-tag hash-tag--xs hash-tag-xs-down--md text-truncate\' href=\'/tx/';
+                var transactionHashes = getIdentifierList(data, transactionTag);
+                //document.getElementById('transactionTableBody').innerHTML = transactionHashes;
+
+                var senderTag = 'From <a class=\'hash-tag text-truncate\' href=\'/address/';
+                var senders = getIdentifierList(data, senderTag);
+                //document.getElementById('transactionTableBody').innerHTML = senders;
+
+                var receiverTag = '<span class=\'d-sm-block\'>To <a href=\'/address/';
+                var receivers = getReceiverList(data, receiverTag);
+                //document.getElementById('transactionTableBody').innerHTML = receivers;
+
+                var amountTag = 'title=\'Amount\'>';
+                var amounts = getAmounts(data, amountTag);
+                //document.getElementById('transactionTableBody').innerHTML = amounts;
+
+                var table = document.getElementById('transactionTableBody');
+
+                for (var i = 0; i < transactionHashes.length && i < senders.length && i < receiverTag.length && i < amounts.length; i++){
+                    var row = `<tr>
+                                    <td style='width: 33.33%; text-align: center;'>${'Tx&nbsp' + transactionHashes[i].substring(0,15) + '...'}</td>
+                                    <td style='width: 33.33%;'>${'From&nbsp' + senders[i].substring(0,20) + '...\n' + 'To&nbsp' + receivers[i].substring(0,20) + '...'}</td>
+                                    <td style='width: 33.33%;  text-align: center;'>${amounts[i] + '&nbsp'+ 'Eth'}</td>
+                                </tr>`;
+                    table.innerHTML += row
+                }
+            }
+
+            function getAmounts(data, tag) {
+                var len = data.length, tagLen = tag.length;
+                let amounts = [];
+                let idx = data.indexOf(tag);
+                    
+                while (idx != -1) {
+                    var amount = "";
+                    var j;
+                    for(j=idx+tagLen; j<len && data[j] != 'E'; j++) {
+                        if(data[j] == '.' || (data[j] >= '0' && data[j] <= '9')) {
+                            amount += data[j];
+                        }
+                    }
+
+                    amounts.push(amount);
+                    idx = data.indexOf(tag, idx+1);
+                }
+        
+                return amounts;
+            }
+
+            function getReceiverList(data, tag) {
+                var len = data.length, tagLen = tag.length;
+                let receivers = [];
+                let idx = data.indexOf(tag);
+                    
+                while (idx != -1) {
+                    var receiver = "";
+                    var j;
+                    for(j=idx+tagLen; j<len && data[j] != '\''; j++) {
+                        receiver += data[j];
+                    }
+
+                    receivers.push(receiver);
+                    idx = data.indexOf(tag, idx+1);
+                }
+        
+                return receivers;
+            }
+
+            function getIdentifierList(data, tag) {
+                var len = data.length, tagLen = tag.length;
+                let miners = [];
+                let idx = data.indexOf(tag);
+                    
+                while (idx != -1) {
+                    var miner = "";
+                    var j;
+                    for(j=idx+tagLen+1; j<len && data[j] != '\''; j++) {}
+                    for(j=j+2; j<len && data[j] != '<'; j++) {
+                        miner += data[j];
+                    }
+
+                    miners.push(miner);
+                    idx = data.indexOf(tag, idx+1);
+                }
+        
+                return miners;
+            }
+
+            function fetchLatestData() {
+                //const fetch = require('node-fetch');
+
+                fetch('https://api.codetabs.com/v1/proxy?quest=https://etherscan.io/')
+                .then(
+                    function(response) {
+                        if (response.status !== 200) {
+                            alert("Problem scraping");
+                            console.log('Looks like there was a problem. Status Code: ' +
+                            response.status);
+                            return;
+                        }
+
+                        // Examine the text in the response
+                        response.text().then(function(data) {
+                            // data contains all the plain html of the url you previously set, 
+                            // you can use it as you want, it is typeof string
+
+                            fetchTPSData(data);
+
+                            fetchDiffiicultyData(data);
+
+                            ///fetchTransactionHistoryData(data);
+
+                            fetchLatestBlockData(data);
+
+                            fetchLatestTransactionData(data);
+                        });
+                    }
+                )
+                .catch(function(err) {
+                    console.log('Fetch Error :-S', err);
+                    const dataManager = new HistoricDataManager();
+                    dataManager.prepareData();
+                });
+            }
+
+            function toogleDataSeries(e){
+                if (typeof(e.dataSeries.visible) === "undefined" || e.dataSeries.visible) {
+                    e.dataSeries.visible = false;
+                } else{
+                    e.dataSeries.visible = true;
+                }
+                chart.render();
+            }
+
+            function searchButtonClicked() {
+                var data = document.getElementById('searchInput').value;
+                data = data.trim();
+                if(data.length == 0) {
+                    return;
+                }
+
+                hideContents();
+
+                const searchHandler = new SearchHandler();
+                searchHandler.processSearch();
+            }
+
+            function hideContents() {
+                var dividers = document.getElementsByClassName('statisticsInfo');
+                for (var i = 0; i < dividers.length; i++) {
+                    dividers[i].style.visibility = 'collapse';
+                }
+
+                document.getElementById('dataDiv').style.visibility = 'collapse';
+
+                document.getElementById('blockSearchResultDiv').style.visibility = 'collapse';
+
+                document.getElementById('tnxSearchResultDiv').style.visibility = 'collapse';
+
+                document.getElementById('loadingEffeectPara').style.visibility = 'collapse';
+
+                document.getElementById('loadingEffeectPara').style.display = 'none';
+            }
+
+            function titleClicked() {
+                window.location.href = "./index.HTML";
+            }
+        </script>
+    </head>
+
+    <body>
+        <h1 style="color: greenyellow; width: fit-content; cursor: pointer; margin-left: 6px;" onclick="titleClicked()"><b><i>EtherChain</i></b></h1>
+        <div class="wrapper">
+            <div class="container">
+                <div class="search_wrap search_wrap_1">
+                    <div class="search_box">
+                        <input id="searchInput" type="text" class="input" placeholder="Insert block number or transaction hash...">
+                        <div class="btn btn_common" onclick="searchButtonClicked()">
+                            <i class="fas fa-search"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <p id="loadingEffeectPara" style="text-align: center; font-size: 25px; color: white;"><b><i>Loading Data...</i></b></p>
+
+        <div id="mainContentDiv" style="visibility: collapse; margin-bottom: 100px;">
+            <div class="statisticsInfo" id="stat1" style="height: 300px; width: 582px; border-radius: 10px; margin-left: 27px; background: snow; vertical-align: middle;">
+                <div style="vertical-align: middle;">
+                    <h4 style="text-align: center; width: 582px; vertical-align: middle; margin-top: 80px;"><span style="vertical-align: middle; font-size: 17px;">Throughput</span> <span style="color: green; font-size: 35; vertical-align: middle;"><b id="tpsInfo" ></b></span> <span style="vertical-align: middle; color: steelblue; font-size: 17px;">TPS</span></h4>
+                    <h4 style="text-align: center; width: 582px; vertical-align: middle; margin-top: 5px;"><span style="vertical-align: middle; font-size: 17px;">Difficulty</span> <span style="color: indigo; font-size: 35; vertical-align: middle;"><b id="difficultyInfo" ></b></span> <span style="vertical-align: middle; color: steelblue; font-size: 17px;">TH</span></h4>
+                    <!--<h4 style="text-align: center; width: 582px; vertical-align: middle; margin-top: 15px;">Difficulty is <b id="difficultyInfo">A.BB</b> TH</h4>-->     
+                </div>
+            </div>
+
+            <div class="statisticsInfo" id="chartContainer" style="height: 300px; width: 582px; border-radius: 10px; margin-left: 27px;  background: snow;">
+                <h1 style="margin-left: 160px; margin-top: 100px; opacity: 0.5;">Loading chart...</h1>
+            </div>
+
+            <div id="dataDiv" style="align-content: center; padding-left: 15px; padding-right: 15px;">
+                <div class="historyRecord" id="block" style=" opacity: 1.0; border-radius: 10px;  background: white; width: 582px; margin-left: 18px;">
+                    <p style="margin: 15px; font-weight: bold;">Latest Blocks</p>
+                    <hr style="background:gray;"/>
+                    <table id="blockTable" title="Latest Blocks" style="width: 100%; opacity: 1.0;">
+                        <thead>
+                        </thead>
+
+                        <tbody id="blockTableBody" style="padding-left: 20px;">
+                            <tr>
+                            </tr>
+                        </tbody>
+                    </table>       
+                </div>
+                <div class="historyRecord" id="transaction" style="border-radius: 10px; background: white; width: 582px; margin-left: 18px;">
+                    <p style="margin: 15px; font-weight: bold;">Latest Transactions</p>
+                    <hr style="background:gray;"/>
+                    <table id="transactionTable" title="Latest transactions" style="width: 100%">
+                        <thead>
+                        </thead>
+
+                        <tbody id="transactionTableBody">
+                            <tr>
+                            </tr>
+                        </tbody>
+                    </table>       
+                </div>
+            </div>
+
+            <div id = "blockSearchResultDiv" style="background: white; border-radius: 15px; visibility: collapse; position: absolute; top: 35%; left:28%;"> <!--- width: 50%; height: 50%; align-content: center;"> -->
+                <h2 style="text-align: center;"><b>Block found</b></h2>
+                 <table>
+                     <thead>
+                     </thead>
+
+                     <tbody id="blockSearchResultTableBody">
+                         <tr>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                         </tr>
+                     </tbody>
+                 </table>
+            </div>
+
+            <div id = "tnxSearchResultDiv" style="background: white; border-radius: 7.5px; visibility: collapse; position: absolute; top: 35%; left:28%;">
+                <h2 style="text-align: center;"><b>Transaction found</b></h2>
+                <table>
+                    <thead>
+                    </thead>
+
+                    <tbody id="tnxSearchResultTableBody">
+                        <tr>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                         </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <footer style="height: 500px;">
+                <div style="background: transparent; width: max-content; height: 250px; align-content: center;"><h1 style="align-content: center;">.</h1></div>
+            </footer>
+
+        </div>
+    </body>
+
+</html>
